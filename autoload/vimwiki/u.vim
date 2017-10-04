@@ -20,17 +20,12 @@ function! vimwiki#u#cursor(lnum, cnum) "{{{
 endfunction "}}}
 
 function! vimwiki#u#is_windows() "{{{
-  return has("win32") || has("win64") || has("win95") || has("win16")
+  return std#os#has_windows()
 endfunction "}}}
 
-function! vimwiki#u#is_macos()
-  if has("mac") || has("macunix") || has("gui_mac")
-    return 1
-  endif
-  " that still doesn't mean we are not on Mac OS
-  let os = substitute(system('uname'), '\n', '', '')
-  return os == 'Darwin' || os == 'Mac'
-endfunction
+function! vimwiki#u#is_macos() " {{{
+  return std#os#has_mac()
+endfunction " }}}
 
 function! vimwiki#u#count_first_sym(line) "{{{
   let first_sym = matchstr(a:line, '\S')

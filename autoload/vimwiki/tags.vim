@@ -26,36 +26,28 @@ let s:TAGS_METADATA_FILE_NAME = '.tags'
 "   a:all_files == '':   only if the file is newer than .tags
 function! vimwiki#tags#update_tags(full_rebuild, all_files) "{{{
   let all_files = a:all_files != ''
-  if !a:full_rebuild
-    " Updating for one page (current)
-    let page_name = VimwikiGet('subdir') . expand('%:t:r')
-    " Collect tags in current file
-    let tags = s:scan_tags(getline(1, '$'), page_name)
-    " Load metadata file
-    let metadata = s:load_tags_metadata()
-    " Drop old tags
-    let metadata = s:remove_page_from_tags(metadata, page_name)
-    " Merge in the new ones
-    let metadata = s:merge_tags(metadata, page_name, tags)
-    " Save
-    call s:write_tags_metadata(metadata)
-  else " full rebuild
-    let files = vimwiki#base#find_files(g:vimwiki_current_idx, 0)
-    let wiki_base_dir = VimwikiGet('path', g:vimwiki_current_idx)
-    let tags_file_last_modification =
-          \ getftime(vimwiki#tags#metadata_file_path())
-    let metadata = s:load_tags_metadata()
-    for file in files
-      if all_files || getftime(file) >= tags_file_last_modification
-        let subdir = vimwiki#base#subdir(wiki_base_dir, file)
-        let page_name = subdir . fnamemodify(file, ':t:r')
+
+  if a:full_rebuild
+    let file_list = vimwiki#fs#find_files(g:vimwiki_current_idx)
+  else
+    let file_list = [expand('%:p')]
+  endif
+
+  let tags_file_last_modification = getftime(vimwiki#tags#metadata_file_path())
+  let wiki_base_dir = VimwikiGet('path', g:vimwiki_current_idx)
+
+  let metadata = s:load_tags_metadata()
+
+  for file in file_list
+    if all_files || getftime(file) >= tags_file_last_modification
+        let page_name = vimwiki#base#subdir(wiki_base_dir, file) . fnamemodify(file, ':t:r')
         let tags = s:scan_tags(readfile(file), page_name)
         let metadata = s:remove_page_from_tags(metadata, page_name)
         let metadata = s:merge_tags(metadata, page_name, tags)
-      endif
-    endfor
-    call s:write_tags_metadata(metadata)
-  endif
+    endif
+  endfor
+
+  call s:write_tags_metadata(metadata)
 endfunction " }}}
 
 " s:scan_tags
@@ -74,7 +66,7 @@ function! s:scan_tags(lines, page_name) "{{{
   let anchor_level = ['', '', '', '', '', '', '']
   let current_complete_anchor = ''
 
-  let PROXIMITY_LINES_NR = 2
+  let PROXIMITY_LINES_NR = vimwiki#conf#get('tags', 'header_proximity')
   let header_line_nr = - (2 * PROXIMITY_LINES_NR)
 
   for line_nr in range(1, len(a:lines))
@@ -117,19 +109,23 @@ function! s:scan_tags(lines, page_name) "{{{
       let str = str[(tagend):]
       for tag in split(tag_group, ':')
         " Create metadata entry
-        let entry = {}
-        let entry.tagname  = tag
-        let entry.lineno   = line_nr
         if line_nr <= PROXIMITY_LINES_NR && header_line_nr < 0
           " Tag appeared at the top of the file
-          let entry.link   = a:page_name
+          let link   = a:page_name
         elseif line_nr <= (header_line_nr + PROXIMITY_LINES_NR)
           " Tag appeared right below a header
-          let entry.link   = a:page_name . '#' . current_complete_anchor
+          let link   = a:page_name . '#' . current_complete_anchor
         else
           " Tag stands on its own
-          let entry.link   = a:page_name . '#' . tag
+          let link   = a:page_name . '#' . tag
         endif
+
+        let priority = -1
+        if match(line, '^' . rxtag) > -1
+          let priority = 1
+        endif
+
+        let entry = s:tag_factory(tag, line_nr, link, a:page_name, priority)
         call add(entries, entry)
       endfor
     endwhile
@@ -156,42 +152,15 @@ function! s:load_tags_metadata() abort "{{{
     if line =~ '^!_TAG_FILE_'
       continue
     endif
-    let parts = matchlist(line, '^\(.\{-}\);"\(.*\)$')
-    if parts[0] == '' || parts[1] == '' || parts[2] == ''
-      throw 'VimwikiTags1: Metadata file corrupted'
+
+    let entry = s:tag_parse_string(line)
+
+    if !has_key(metadata, entry.pagename)
+      let metadata[entry.pagename] = []
     endif
-    let std_fields = split(parts[1], '\t')
-    if len(std_fields) != 3
-      throw 'VimwikiTags2: Metadata file corrupted'
-    endif
-    let vw_part = parts[2]
-    if vw_part[0] != "\t"
-      throw 'VimwikiTags3: Metadata file corrupted'
-    endif
-    let vw_fields = split(vw_part[1:], "\t")
-    if len(vw_fields) != 1 || vw_fields[0] !~ '^vimwiki:'
-      throw 'VimwikiTags4: Metadata file corrupted'
-    endif
-    let vw_data = substitute(vw_fields[0], '^vimwiki:', '', '')
-    let vw_data = substitute(vw_data, '\\n', "\n", 'g')
-    let vw_data = substitute(vw_data, '\\r', "\r", 'g')
-    let vw_data = substitute(vw_data, '\\t', "\t", 'g')
-    let vw_data = substitute(vw_data, '\\\\', "\\", 'g')
-    let vw_fields = split(vw_data, "\t")
-    if len(vw_fields) != 2
-      throw 'VimwikiTags5: Metadata file corrupted'
-    endif
-    let pagename = vw_fields[0]
-    let entry = {}
-    let entry.tagname  = std_fields[0]
-    let entry.lineno   = std_fields[2]
-    let entry.link     = vw_fields[1]
-    if has_key(metadata, pagename)
-      call add(metadata[pagename], entry)
-    else
-      let metadata[pagename] = [entry]
-    endif
+    call add(metadata[entry.pagename], entry)
   endfor
+
   return metadata
 endfunction " }}}
 
@@ -199,12 +168,13 @@ endfunction " }}}
 "   Removes all entries for given page from metadata in-place.  Returns updated
 "   metadata (just in case).
 function! s:remove_page_from_tags(metadata, page_name) "{{{
-  if has_key(a:metadata, a:page_name)
-    call remove(a:metadata, a:page_name)
-    return a:metadata
-  else
-    return a:metadata
+  let meta = a:metadata
+
+  if has_key(meta, a:page_name)
+    call remove(meta, a:page_name)
   endif
+
+  return meta
 endfunction " }}}
 
 " s:merge_tags
@@ -226,21 +196,28 @@ endfunction " }}}
 "   preceeds the same tag on the same page at line 9.  (Because string "14" is
 "   alphabetically 'less than' string "9".)
 function! s:tags_entry_cmp(i1, i2) "{{{
-  let items = []
-  for orig_item in [a:i1, a:i2]
-    let fields = split(orig_item, "\t")
-    let item = {}
-    let item.text = fields[0]."\t".fields[1]
-    let item.lineno = 0 + matchstr(fields[2], '\m\d\+')
-    call add(items, item)
-  endfor
-  if items[0].text ># items[1].text
+  let entry_1 = s:tag_parse_string(a:i1)
+  let entry_2 = s:tag_parse_string(a:i2)
+
+  if entry_1.name ># entry_2.name
     return 1
-  elseif items[0].text <# items[1].text
+  elseif entry_1.name <# entry_2.name
     return -1
-  elseif items[0].lineno > items[1].lineno
+
+  " We want a bigger number to sort first
+  elseif entry_1.priority > entry_2.priority
+    return -1
+  elseif entry_1.priority < entry_2.priority
     return 1
-  elseif items[0].lineno < items[1].lineno
+
+
+  elseif entry_1.pagename > entry_2.pagename
+    return 1
+  elseif entry_1.pagename < entry_2.pagename
+    return -1
+  elseif entry_1.line_number > entry_2.line_number
+    return 1
+  elseif entry_1.line_number < entry_2.line_number
     return -1
   else
     return 0
@@ -254,18 +231,7 @@ function! s:write_tags_metadata(metadata) "{{{
   let tags = []
   for pagename in keys(a:metadata)
     for entry in a:metadata[pagename]
-      let entry_data = pagename . "\t" . entry.link
-      let entry_data = substitute(entry_data, "\\", '\\\\', 'g')
-      let entry_data = substitute(entry_data, "\t", '\\t', 'g')
-      let entry_data = substitute(entry_data, "\r", '\\r', 'g')
-      let entry_data = substitute(entry_data, "\n", '\\n', 'g')
-      call add(tags,
-            \   entry.tagname  . "\t"
-            \ . pagename . VimwikiGet('ext') . "\t"
-            \ . entry.lineno
-            \ . ';"'
-            \ . "\t" . "vimwiki:" . entry_data
-            \)
+      call add(tags, entry.result())
     endfor
   endfor
   call sort(tags, "s:tags_entry_cmp")
@@ -280,7 +246,7 @@ function! vimwiki#tags#get_tags() "{{{
   let tags = {}
   for entries in values(metadata)
     for entry in entries
-      let tags[entry.tagname] = 1
+      let tags[entry.name] = 1
     endfor
   endfor
   return keys(tags)
@@ -300,10 +266,10 @@ function! vimwiki#tags#generate_tags(...) abort "{{{
   let tags_entries = {}
   for entries in values(metadata)
     for entry in entries
-      if has_key(tags_entries, entry.tagname)
-        call add(tags_entries[entry.tagname], entry.link)
+      if has_key(tags_entries, entry.name)
+        call add(tags_entries[entry.name], entry.link)
       else
-        let tags_entries[entry.tagname] = [entry.link]
+        let tags_entries[entry.name] = [entry.link]
       endif
     endfor
   endfor
@@ -339,4 +305,75 @@ function! vimwiki#tags#complete_tags(ArgLead, CmdLine, CursorPos) abort " {{{
   let taglist = vimwiki#tags#get_tags()
   return join(taglist, "\n")
 endfunction " }}}
+
+
+function! s:tag_parse_string(s) abort
+  let parts = matchlist(a:s, '^\(.\{-}\);"\(.*\)$')
+
+  if len(parts) == 0
+    throw 'VimwikiTags1: Metadata file corrupted'
+  endif
+  if parts[0] == '' || parts[1] == '' || parts[2] == ''
+    throw 'VimwikiTags1: Metadata file corrupted'
+  endif
+
+  let std_fields = split(parts[1], '\t')
+  if len(std_fields) != 3
+    throw 'VimwikiTags2: Metadata file corrupted'
+  endif
+
+  let vw_part = parts[2]
+  if vw_part[0] != "\t"
+    throw 'VimwikiTags3: Metadata file corrupted'
+  endif
+
+  let vw_fields = split(vw_part[1:], "\t")
+  if len(vw_fields) != 1 || vw_fields[0] !~ '^vimwiki:'
+    throw 'VimwikiTags4: Metadata file corrupted'
+  endif
+  let vw_data = substitute(vw_fields[0], '^vimwiki:', '', '')
+  try
+    let vw_data = json_decode(vw_data)
+  catch
+    throw 'VimwikiTags5: Metadata file corrupted'
+  endtry
+
+  if !has_key(vw_data, 'pagename') || !has_key(vw_data, 'priority') || !has_key(vw_data, 'link')
+    throw 'VimwikiTags6: Metadata file corrupted'
+  endif
+
+  let pagename = vw_data.pagename
+  return s:tag_factory(std_fields[0], std_fields[2], vw_data.link, pagename, vw_data.priority)
+endfunction
+
+function! s:tag_factory(name, line, link, pagename, ...) abort
+  let tag = {}
+  let tag.name = a:name
+  let tag.line_number = a:line
+  let tag.link = a:link
+  let tag.pagename = a:pagename
+  let tag.priority = get(a:, 1, -1)
+
+  let tag.vimwiki_data = function('s:tag_vimwiki_data', tag)
+  let tag.result = function('s:tag_entry', tag)
+
+  return tag
+endfunction
+
+function! s:tag_vimwiki_data() dict abort
+  return json_encode({
+        \ 'pagename': self.pagename,
+        \ 'link': self.link,
+        \ 'priority': self.priority,
+        \ })
+endfunction
+
+function! s:tag_entry() dict abort
+  return join([
+        \ self.name,
+        \ self.pagename . VimwikiGet('ext'),
+        \ self.line_number . ';"',
+        \ "vimwiki:" . self.vimwiki_data(),
+        \ ], "\t")
+endfunction
 

@@ -14,6 +14,26 @@ call conf#set_version(s:, [1, 0, 0])
 " Try adding a configuration area to your plugin, like so
 " call conf#add_area(s:, 'defaults')
 
+call conf#add_area(s:, 'tags')
+call conf#add_setting(s:, 'tags', 'header_proximity', {
+      \ 'type': v:t_number,
+      \ 'default': 2,
+      \ 'description': 'Number of lines below a header you can place a tag that points to the header',
+      \ })
+
+call conf#add_area(s:, 'mappings')
+call conf#add_setting(s:, 'mappings', 'goto_tag', {
+      \ 'type': v:t_string,
+      \ 'default': '<c-]>',
+      \ 'description': 'Goto a full tag (including "/" and others)',
+      \ 'action': conf#actions#mapping({
+        \ 'mode': 'n',
+        \ 'rhs': ':call vimwiki#maps#goto_tag()<CR>',
+        \ 'noremap': v:true,
+        \ 'buffer': ['vimwiki'],
+        \ })
+      \ })
+
 
 " And then add some options
 " call conf#add_setting(s:, 'defaults', 'map_key', {'default': '<leader>x', 'type': v:t_string})

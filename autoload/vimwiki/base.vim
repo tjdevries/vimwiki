@@ -512,6 +512,8 @@ function! vimwiki#base#backlinks() "{{{
   endif
 endfunction "}}}
 
+" TODO: I think directory searching is broken
+"
 " Returns: a list containing all files of the given wiki as absolute file path.
 " If the given wiki number is negative, the diary of the current wiki is used
 " If the second argument is not zero, only directories are found
@@ -523,8 +525,9 @@ function! vimwiki#base#find_files(wiki_nr, directories_only)
     let root_directory = VimwikiGet('path').VimwikiGet('diary_rel_path')
     let wiki_nr = g:vimwiki_current_idx
   endif
+
   if a:directories_only
-    let ext = '/'
+    let ext = std#path#separator()
   else
     let ext = VimwikiGet('ext', wiki_nr)
   endif
@@ -534,8 +537,9 @@ function! vimwiki#base#find_files(wiki_nr, directories_only)
   if VimwikiGet('temp', wiki_nr)
     let pattern = '*'.ext
   else
-    let pattern = '**/*'.ext
+    let pattern = '**' . std#path#separator() . '*' . ext
   endif
+
   return split(globpath(root_directory, pattern), '\n')
 endfunction
 
