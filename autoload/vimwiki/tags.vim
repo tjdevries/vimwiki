@@ -54,12 +54,12 @@ endfunction " }}}
 "   Scans the list of text lines (argument) and produces tags metadata as a
 "   list of tag entries.
 function! s:scan_tags(lines, page_name) "{{{
-
   let entries = []
 
   " Code wireframe to scan for headers -- borrowed from
   " vimwiki#base#get_anchors(), with minor modifications.
 
+  " TODO(tjdevries): Switch to a more reasonable dictionary approach
   let rxheader = g:vimwiki_{VimwikiGet('syntax')}_header_search
   let rxtag = g:vimwiki_{VimwikiGet('syntax')}_tag_search
 

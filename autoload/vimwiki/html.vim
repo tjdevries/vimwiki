@@ -13,13 +13,6 @@
 " mediawiki --            --> Latex
 "
 
-" Load only once {{{
-if exists("g:loaded_vimwiki_html_auto") || &cp
-  finish
-endif
-let g:loaded_vimwiki_html_auto = 1
-"}}}
-
 " UTILITY "{{{
 function! s:root_path(subdir) "{{{
   return repeat('../', len(split(a:subdir, '[/\\]')))

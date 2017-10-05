@@ -491,7 +491,7 @@ function! vimwiki#base#backlinks() "{{{
   let locations = []
   for idx in range(len(g:vimwiki_list))
     let syntax = VimwikiGet('syntax', idx)
-    let wikifiles = vimwiki#base#find_files(idx, 0)
+    let wikifiles = vimwiki#fs#find_files(idx)
     for source_file in wikifiles
       let links = s:get_links(source_file, idx)
       for [target_file, _, lnum, col] in links
@@ -512,43 +512,12 @@ function! vimwiki#base#backlinks() "{{{
   endif
 endfunction "}}}
 
-" TODO: I think directory searching is broken
-"
-" Returns: a list containing all files of the given wiki as absolute file path.
-" If the given wiki number is negative, the diary of the current wiki is used
-" If the second argument is not zero, only directories are found
-function! vimwiki#base#find_files(wiki_nr, directories_only)
-  let wiki_nr = a:wiki_nr
-  if wiki_nr >= 0
-    let root_directory = VimwikiGet('path', wiki_nr)
-  else
-    let root_directory = VimwikiGet('path').VimwikiGet('diary_rel_path')
-    let wiki_nr = g:vimwiki_current_idx
-  endif
-
-  if a:directories_only
-    let ext = std#path#separator()
-  else
-    let ext = VimwikiGet('ext', wiki_nr)
-  endif
-  " if current wiki is temporary -- was added by an arbitrary wiki file then do
-  " not search wiki files in subdirectories. Or it would hang the system if
-  " wiki file was created in $HOME or C:/ dirs.
-  if VimwikiGet('temp', wiki_nr)
-    let pattern = '*'.ext
-  else
-    let pattern = '**' . std#path#separator() . '*' . ext
-  endif
-
-  return split(globpath(root_directory, pattern), '\n')
-endfunction
-
 " Returns: a list containing the links to get from the current file to all wiki
 " files in the given wiki.
 " If the given wiki number is negative, the diary of the current wiki is used.
 " If also_absolute_links is nonzero, also return links of the form /file
 function! vimwiki#base#get_wikilinks(wiki_nr, also_absolute_links)
-  let files = vimwiki#base#find_files(a:wiki_nr, 0)
+  let files = vimwiki#fs#find_files(a:wiki_nr)
   if a:wiki_nr == g:vimwiki_current_idx
     let cwd = vimwiki#path#wikify_path(expand('%:p:h'))
   elseif a:wiki_nr < 0
@@ -579,7 +548,7 @@ endfunction
 
 " Returns: a list containing the links to all directories from the current file
 function! vimwiki#base#get_wiki_directories(wiki_nr)
-  let dirs = vimwiki#base#find_files(a:wiki_nr, 1)
+  let dirs = vimwiki#fs#find_directories(a:wiki_nr)
   if a:wiki_nr == g:vimwiki_current_idx
     let cwd = vimwiki#path#wikify_path(expand('%:p:h'))
     let root_dir = VimwikiGet('path')
@@ -741,7 +710,7 @@ function! vimwiki#base#check_links() "{{{
   let errors = []
   for idx in range(len(g:vimwiki_list))
     let syntax = VimwikiGet('syntax', idx)
-    let wikifiles = vimwiki#base#find_files(idx, 0)
+    let wikifiles = vimwiki#fs#find_files(idx)
     for wikifile in wikifiles
       let links_of_files[wikifile] = s:get_links(wikifile, idx)
       let anchors_of_files[wikifile] = vimwiki#base#get_anchors(wikifile, syntax)
